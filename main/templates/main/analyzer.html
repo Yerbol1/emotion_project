@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+  <meta charset="UTF-8" />
+  <title>Көңіл-күй анализаторы</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* --- Сенің дизайн стилің еш өзгеріссіз қалдырылды --- */
+    body {
+      background: radial-gradient(circle at top right, #1e3a8a, #111827);
+      color: #fff;
+      font-family: 'Poppins', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      margin: 0;
+      padding: 24px;
+    }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px;
+      padding: 20px;
+      width: 380px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+    .input-field {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 10px;
+      color: #fff;
+      width: 100%;
+      margin-bottom: 12px;
+      outline: none;
+    }
+    .btn {
+      background: linear-gradient(to right, #2563eb, #1e40af);
+      border: none;
+      padding: 10px;
+      border-radius: 8px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+    }
+    .scanner {
+      width: 320px;
+      height: 240px;
+      border: 3px solid #22d3ee;
+      border-radius: 10px;
+      position: relative;
+      overflow: hidden;
+      margin: 10px auto;
+    }
+    video, canvas {
+      width: 320px;
+      height: 240px;
+      border-radius: 8px;
+      display: block;
+    }
+    .indicator {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%,-50%);
+      border: 3px dashed rgba(34,211,238,0.6);
+      width: 140px;
+      height: 140px;
+      border-radius: 8px;
+      pointer-events: none;
+      box-shadow: 0 0 30px rgba(34,211,238,0.06);
+    }
+    .result-box {
+      margin-top: 12px;
+      text-align: left;
+      color: #e6eef8;
+    }
+    .label { color: #a7f3d0; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="card text-center">
+    <h1 class="text-3xl font-bold mb-5 text-cyan-400">🧠 Көңіл-күй анализаторы</h1>
+
+    <input id="fullName" class="input-field" type="text" placeholder="Аты-жөніңіз (мысалы: Ербол Саийфуллаев)" />
+
+    <select id="ageGroup" class="input-field">
+      <option value="">Жас аралығын таңдаңыз</option>
+      <option value="5–8 жас">5–8 жас</option>
+      <option value="8–12 жас">8–12 жас</option>
+      <option value="12–17 жас">12–17 жас</option>
+    </select>
+
+    <button id="startBtn" class="btn mb-3">🎥 Анализ жасау</button>
+
+    <div id="scanner" class="scanner hidden">
+      <video id="video" autoplay playsinline></video>
+      <div class="indicator"></div>
+    </div>
+
+    <div id="status" class="mt-2 text-sm text-cyan-200"></div>
+
+    <div id="result" class="result-box"></div>
+  </div>
+
+<script>
+/*
+  Frontend logic:
+  - аты-жөн және жас таңдалса "Анализ жасау" батырмасын басқанда камера ашылады
+  - 5 секунд бойы кадрлар алынады (әдетте ~700ms интервал)
+  - кадрлар base64 тізімі ретінде /analyze/ endpoint-қа жіберіледі (POST JSON)
+  - сервер DeepFace арқылы өңдейді, орташа индекс, доминант эмоция және кеңес қайтарады
+  - жауап көрсетіледі
+  - CSRF cookie-дан алынады (Django үшін)
+*/
+
+const startBtn = document.getElementById('startBtn');
+const video = document.getElementById('video');
+const scanner = document.getElementById('scanner');
+const status = document.getElementById('status');
+const result = document.getElementById('result');
+
+function getCookie(name) {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (const cookie of cookies) {
+      const c = cookie.trim();
+      if (c.startsWith(name + '=')) {
+        cookieValue = decodeURIComponent(c.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+}
+
+startBtn.addEventListener('click', async () => {
+  const fullName = document.getElementById('fullName').value.trim();
+  const ageGroup = document.getElementById('ageGroup').value;
+
+  if (!fullName) { alert('Аты-жөніңізді енгізіңіз'); return; }
+  if (!ageGroup) { alert('Жас аралығын таңдаңыз'); return; }
+
+  // UI
+  result.innerHTML = '';
+  status.innerText = 'Камера ашылуда — көзге фокус орналастырыңыз (5 сек)...';
+  scanner.classList.remove('hidden');
+
+  // Суреттер жинау
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    video.srcObject = stream;
+  } catch (err) {
+    scanner.classList.add('hidden');
+    status.innerText = 'Камераға қатынау мүмкін болмады: ' + err.message;
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+
+  const frames = [];
+  const intervalMs = 700; // әр 700ms кадр алу
+  const durationMs = 5000; // 5 секунд
+  status.innerText = 'Сканерлеу: 0%';
+
+  let elapsed = 0;
+  const start = Date.now();
+
+  const iv = setInterval(() => {
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+      frames.push(dataUrl);
+    } catch (e) {
+      console.error('capture error', e);
+    }
+    elapsed = Date.now() - start;
+    const pct = Math.min(100, Math.round((elapsed / durationMs) * 100));
+    status.innerText = `Сканерлеу: ${pct}%`;
+  }, intervalMs);
+
+  // аяқтау таймері
+  setTimeout(async () => {
+    clearInterval(iv);
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
+    scanner.classList.add('hidden');
+    status.innerText = 'Анализ серверге жіберілуде...';
+
+    // POST JSON: full_name, age_group, frames[]
+    try {
+      const resp = await fetch('/analyze/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken')
+        },
+        body: JSON.stringify({
+          full_name: fullName,
+          age_group: ageGroup,
+          frames: frames
+        })
+      });
+
+      if (!resp.ok) {
+        const t = await resp.text();
+        throw new Error(`Сервер қатесі: ${resp.status} ${t}`);
+      }
+
+      const data = await resp.json();
+
+      // Show result
+      status.innerText = 'Анализ аяқталды';
+      result.innerHTML = `
+        <div class="p-3 rounded-md" style="background: rgba(0,0,0,0.25);">
+          <div style="color:#fef3c7;font-weight:700;margin-bottom:6px;">🔎 Нәтиже</div>
+          <div><span class="label">Аты-жөн:</span> ${escapeHtml(fullName)}</div>
+          <div><span class="label">Жас аралығы:</span> ${escapeHtml(ageGroup)}</div>
+          <div style="margin-top:8px;"><span class="label">Эмоция (доминант):</span> ${escapeHtml(data.emotion)}</div>
+          <div><span class="label">Орташа индекс (пайыз):</span> ${escapeHtml(data.avg_score)}</div>
+          <hr style="margin:8px 0; border-color: rgba(255,255,255,0.08)" />
+          <div style="color:#e6eef8; white-space:pre-wrap;">${escapeHtml(data.advice)}</div>
+        </div>
+      `;
+
+    } catch (err) {
+      console.error(err);
+      status.innerText = 'Анализ барысында қате пайда болды: ' + err.message;
+      result.innerHTML = `<div style="color:#ffd7d7">Қате: ${escapeHtml(err.message)}</div>`;
+    }
+  }, durationMs);
+});
+
+function escapeHtml(s) {
+  // Қандай да бір не string емес мән келсе, оны string-ке айналдырамыз
+  if (s === null || s === undefined) return '';
+  s = String(s);
+  // Ғаламдық ауыстыру үшін регексті қолданамыз (барлық орындалымдарына)
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+</script>
+</body>
+</html>

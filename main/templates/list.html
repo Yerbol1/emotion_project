@@ -1,0 +1,17 @@
+<h2>Барлық оқушылар</h2>
+<table border="1">
+  <tr>
+    <th>Аты-жөні</th>
+    <th>Жасы</th>
+    <th>Көңіл-күй</th>
+    <th>Күні</th>
+  </tr>
+  {% for s in students %}
+  <tr>
+    <td>{{ s.name }}</td>
+    <td>{{ s.age }}</td>
+    <td>{{ s.average_mood }}</td>
+    <td>{{ s.date|date:"d.m.Y H:i" }}</td>
+  </tr>
+  {% endfor %}
+</table>

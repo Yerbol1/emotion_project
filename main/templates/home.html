@@ -1,0 +1,6 @@
+<h2>Оқушы туралы ақпарат енгіз</h2>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Көңіл-күй анализін бастау</button>
+</form>
