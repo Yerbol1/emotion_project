@@ -25,7 +25,8 @@ SECRET_KEY = 'django-insecure-5&gjiaq6lhuv_mpuz9ud!i9mz&lwzy#gwfbbn&^7c8nx**5c8m
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['emotion-project-9ft9.onrender.com', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['web-production-6718c.up.railway.app', '127.0.0.1', 'localhost']
+
 
 
 
@@ -123,3 +124,6 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'static']
